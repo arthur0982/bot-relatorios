@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StatusPlaca {
+  ESTOQUE
+  DISPONIVEL
+  ATIVA
+  INATIVA
+}
+
+enum TipoPlaca {
+  GOOGLE
+  PIX
+  WIFI
+  SITE
+}
+
+enum StatusBotLog {
+  SUCESSO
+  ERRO
+}
+
+model Usuario {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  senhaHash String
+  nome      String
+  createdAt DateTime @default(now())
+}
+
+model RegistroFinanceiro {
+  id                String   @id @default(cuid())
+  mes               Int
+  ano               Int
+  faturamento       Float
+  investimento      Float
+  quantidadeVendas  Int
+  dataAtualizacao   DateTime @default(now()) @updatedAt
+
+  @@unique([mes, ano])
+}
+
+model Contrato {
+  id              String   @id @default(cuid())
+  nomeEmpresa     String
+  telefoneContato String?
+  ativo           Boolean  @default(true)
+  dataCriacao     DateTime @default(now())
+  placas          Placa[]
+}
+
+model Placa {
+  id               String      @id @default(cuid())
+  codigo           String?     @unique
+  tipo             TipoPlaca   @default(GOOGLE)
+  nomeEmpresa      String?
+  linkAvaliacao    String?
+  placeId          String?
+  urlDestino       String?
+  destino          String?
+  pixChave         String?
+  pixNome          String?
+  pixCidade        String?
+  pixDescricao     String?
+  pixValorCentavos Int?
+  wifiSsid         String?
+  wifiSenha        String?
+  wifiSeguranca    String?
+  wifiOculta       Boolean     @default(false)
+  status           StatusPlaca @default(DISPONIVEL)
+  totalLeituras    Int         @default(0)
+  botAtivo         Boolean     @default(false)
+  telefoneWhatsapp String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @default(now())
+  contratoId       String?
+  contrato         Contrato?   @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  botLogs          BotLog[]
+
+  @@index([tipo])
+  @@index([contratoId])
+  @@index([botAtivo])
+}
+
+model BotLog {
+  id        String       @id @default(cuid())
+  placaId   String
+  placa     Placa        @relation(fields: [placaId], references: [id], onDelete: Cascade)
+  enviadoEm DateTime     @default(now())
+  status    StatusBotLog
+  resumo    String       @db.Text
+  erro      String?      @db.Text
+
+  @@index([placaId])
+  @@index([enviadoEm])
+}
