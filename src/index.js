@@ -1,7 +1,7 @@
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const cron = require('node-cron')
-const { prisma } = require('./db')
+const { prisma, checkDatabase, disconnectDatabase } = require('./db')
 const { formatarDataHora, inicioDoDiaBrasilia, inicioJanelaAvaliacoes } = require('./janela')
 const { abrirNavegador, coletarAvaliacoes } = require('./scraper')
 const { gerarRelatorio, montarMensagem } = require('./relatorio')
@@ -115,7 +115,7 @@ async function executarRodada(whatsapp) {
   const forcar = process.argv.includes('--forcar')
 
   const todas = await prisma.placa.findMany({
-    where: { botAtivo: true, tipo: 'GOOGLE' },
+    where: { botAtivo: true, tipo: 'GOOGLE', status: 'ATIVA', contrato: { is: { ativo: true } } },
     include: { contrato: { select: { nomeEmpresa: true, telefoneContato: true, ativo: true } } },
     orderBy: [{ contratoId: 'asc' }, { nomeEmpresa: 'asc' }],
   })
@@ -206,6 +206,9 @@ function protegerProcesso() {
 
 async function main() {
   exigirAmbiente()
+  await checkDatabase()
+  // Refuse the wrong schema/role before opening Chrome or WhatsApp.
+  await prisma.placa.count()
   protegerProcesso()
 
   const whatsapp = criarWhatsapp()
@@ -246,7 +249,8 @@ async function main() {
 }
 
 main().catch(async (erro) => {
-  console.error(erro instanceof Error ? erro.message : erro)
-  await prisma.$disconnect().catch(() => {})
+  const allowed = ['IDENTITY_REQUIRED', 'INVALID_DATABASE_URL', 'SHARED_DATABASE_BLOCKED', 'UNRECOGNIZED_DATABASE_HOST', 'PROJECT_REF_REQUIRED', 'WRONG_SUPABASE_PROJECT', 'SCHEMA_NOT_PREPARED', 'WRONG_DATABASE']
+  console.error(allowed.includes(erro.code) ? `${erro.code}: ${erro.message}` : 'BOT_START_FAILED: confira banco exclusivo, permissões e conexão do WhatsApp. Nenhuma exceção bruta foi impressa.')
+  await disconnectDatabase().catch(() => {})
   process.exit(1)
 })
