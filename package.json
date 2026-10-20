@@ -19,6 +19,14 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "allowScripts": {
+    "@prisma/client@6.19.0": true,
+    "@prisma/engines@6.19.0": true,
+    "prisma@6.19.0": true,
+    "protobufjs@7.6.6": true,
+    "puppeteer@25.12.0": true,
+    "puppeteer@24.38.0": true
+  },
   "dependencies": {
     "@google/genai": "^2.24.0",
     "@prisma/client": "6.19.0",

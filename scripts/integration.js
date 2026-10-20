@@ -12,6 +12,7 @@ const password = randomBytes(32).toString('hex')
 const dockerEnv = { ...process.env, POSTGRES_PASSWORD: password }
 const docker = args => execFileSync('docker', args, { env: dockerEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 let started = false, admin, bot, raw
+let stage = 'bootstrap'
 async function main() {
   const panel = process.env.PLATES_PANEL_CHECKOUT || path.resolve(__dirname, '../../gerenciadorplacas')
   const { newClient, initialize, configureBotRole } = await import(pathToFileURL(path.join(panel, 'scripts/panel-database.mjs')).href)
@@ -33,6 +34,19 @@ async function main() {
   url.username = 'placas_bot'; url.password = rolePassword
   bot = createBotDatabase(url.href, identity)
   await bot.check()
+  stage = 'wrong_password'
+  const incorrect = new URL(url.href); incorrect.password = 'incorrect-test-only-password'
+  const badPassword = createBotDatabase(incorrect.href, identity)
+  try { await assert.rejects(badPassword.check(), { code: 'DATABASE_AUTH_FAILED' }) }
+  finally { await badPassword.prisma.$disconnect() }
+  const noAccessRole = 'without_access_' + randomUUID().replaceAll('-', '')
+  stage = 'missing_permissions'
+  await admin.$executeRawUnsafe(`CREATE ROLE "${noAccessRole}" LOGIN PASSWORD '${rolePassword}'`)
+  const deniedUrl = new URL(url.href); deniedUrl.username = noAccessRole
+  const denied = createBotDatabase(deniedUrl.href, identity)
+  try { await assert.rejects(denied.check(), { code: 'DATABASE_PERMISSION_DENIED' }) }
+  finally { await denied.prisma.$disconnect() }
+  stage = 'operational_query'
   assert.deepEqual(await bot.prisma.placa.findMany(), [])
   const contract = await admin.contrato.create({ data: { nomeEmpresa: 'Synthetic Integration', telefoneContato: '5511999999999' } })
   const plate = await admin.placa.create({ data: { contratoId: contract.id, nomeEmpresa: contract.nomeEmpresa, tipo: 'GOOGLE', status: 'ATIVA', botAtivo: true, placeId: 'ChIJ_Synthetic', telefoneWhatsapp: '5511999999999', wifiSenha: 'private-test-only' } })
@@ -46,22 +60,26 @@ async function main() {
   await assert.rejects(bot.prisma.placa.deleteMany(), /BOT_OPERATION_BLOCKED/)
   await assert.rejects(bot.prisma.$executeRawUnsafe('DROP SCHEMA placas CASCADE'), /BOT_OPERATION_BLOCKED/)
   const wrong = createBotDatabase(url.href, randomUUID())
+  stage = 'wrong_identity'
   try { await assert.rejects(wrong.prisma.placa.count(), { code: 'WRONG_DATABASE' }) }
   finally { await wrong.prisma.$disconnect() }
   url.searchParams.set('schema', 'placas')
   raw = new PrismaClient({ datasources: { db: { url: url.href } } })
+  stage = 'sql_privileges'
   for (const sql of ['SELECT * FROM placas."Usuario"', 'SELECT * FROM placas."RegistroFinanceiro"', 'SELECT "wifiSenha" FROM placas."Placa"', 'DROP TABLE placas."Placa" CASCADE', 'DELETE FROM placas."BotLog"'])
     await assert.rejects(raw.$queryRawUnsafe(sql))
+  stage = 'diagnostic_cli'
   const check = spawnSync(process.execPath, ['scripts/check.js'], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, DATABASE_URL: url.href, PLATES_DATABASE_ID: identity }, encoding: 'utf8' })
   assert.equal(check.status, 0)
   const result = JSON.parse(check.stdout)
   assert.equal(result.enabledPlates, 1)
   assert.equal(result.messagesSent, 0)
   assert.equal(await admin.botLog.count(), 1)
-  console.log('BOT INTEGRATION OK: empty database, real restricted role, report query, shared log persistence, wrong identity refusal, forbidden reads/DDL/deletes and read-only diagnostic. No WhatsApp, Google or Gemini requests.')
+  console.log('BOT INTEGRATION OK: empty database, real restricted role, report query, shared log persistence, wrong password/permission/identity diagnosis, forbidden reads/DDL/deletes and read-only diagnostic. No WhatsApp, Google or Gemini requests.')
 }
-main().catch(() => {
-  console.error('BOT_INTEGRATION_FAILED: confira Docker e o checkout irmão gerenciadorplacas. Somente banco descartável foi utilizado; nenhuma exceção de conexão foi impressa.')
+main().catch(error => {
+  const safeCode = value => typeof value === 'string' && /^[A-Z0-9_]{2,64}$/.test(value) ? value : undefined
+  console.error(JSON.stringify({ code: 'BOT_INTEGRATION_FAILED', stage, testCode: safeCode(error.code), actualCode: safeCode(error.actual?.code), expectedCode: safeCode(error.expected?.code), prismaCode: safeCode(error.actual?.details?.prismaCode), sqlState: safeCode(error.actual?.details?.sqlState), message: 'Confira Docker e o checkout irmão gerenciadorplacas. Somente banco descartável foi utilizado; nenhuma exceção de conexão foi impressa.' }))
   process.exitCode = 1
 }).finally(async () => {
   if (raw) await raw.$disconnect()

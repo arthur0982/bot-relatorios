@@ -4,6 +4,7 @@ const DATABASE_SCHEMA = 'placas'
 // This project previously held unrelated CRM tables. Never reconnect this panel
 // to it, even if an old .env or deploy setting is copied into the new setup.
 const RETIRED_SHARED_PROJECT = 'ejzuxtvrdtpxtpdewviu'
+const { databaseFailure } = require('./database-errors')
 
 class PanelDatabaseError extends Error {
   constructor(code, message) {
@@ -54,8 +55,11 @@ async function checkDatabaseIdentity(client, value) {
   let rows
   try {
     rows = await client.$queryRawUnsafe('SELECT id, application, "instanceId" FROM "placas"."PanelDatabaseIdentity"')
-  } catch {
-    throw new PanelDatabaseError('SCHEMA_NOT_PREPARED', 'O schema exclusivo do painel não está preparado ou acessível. Não execute db push/reset para corrigir.')
+  } catch (error) {
+    const safe = databaseFailure(error, 'identity_query')
+    const failure = new PanelDatabaseError(safe.code, safe.message)
+    failure.details = safe.details
+    throw failure
   }
   if (rows.length !== 1 || rows[0].id !== 1 || rows[0].application !== DATABASE_APPLICATION || rows[0].instanceId !== expected)
     throw new PanelDatabaseError('WRONG_DATABASE', 'A identidade deste banco não corresponde ao painel. A operação foi bloqueada.')
